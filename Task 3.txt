@@ -1,0 +1,154 @@
+Task 3:
+Choose a programming language and application.
+Review the code for security vulnerabilities and provide recommendations for secure coding practices
+Use tools like static code analyzers or manual code review. java
+
+
+The application is: Online Banking System
+import java.io.*;
+import javax.servlet.*;
+import javax.servlet.annotation.*;
+import javax.servlet.http.*;
+import java.sql.*;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+import java.security.SecureRandom;
+import java.util.Base64;
+
+@WebServlet("/login")
+public class LoginServlet extends HttpServlet {
+    private static final long serialVersionUID = 1L;
+    private static final String SALT = "randomSalt"; // Replace with securely stored salt
+
+    protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+        String username = request.getParameter("username");
+        String password = request.getParameter("password");
+
+        try {
+            if (authenticate(username, password)) {
+                HttpSession session = request.getSession();
+                session.setAttribute("username", username);
+                response.sendRedirect("dashboard.jsp");
+            } else {
+                response.getWriter().println("Invalid credentials.");
+            }
+        } catch (Exception e) {
+            response.getWriter().println("An error occurred during authentication.");
+        }
+    }
+
+    private boolean authenticate(String username, String password) throws Exception {
+        boolean isValid = false;
+        Connection conn = null;
+        PreparedStatement stmt = null;
+        ResultSet rs = null;
+
+        try {
+            conn = DriverManager.getConnection("jdbc:mysql://localhost:3306/bankdb", "root", "password");
+            String sql = "SELECT password, salt FROM users WHERE username = ?";
+            stmt = conn.prepareStatement(sql);
+            stmt.setString(1, username);
+            rs = stmt.executeQuery();
+
+            if (rs.next()) {
+                String storedPassword = rs.getString("password");
+                String storedSalt = rs.getString("salt");
+                String hashedPassword = hashPassword(password, storedSalt);
+                isValid = storedPassword.equals(hashedPassword);
+            }
+        } finally {
+            if (rs != null) rs.close();
+            if (stmt != null) stmt.close();
+            if (conn != null) conn.close();
+        }
+
+        return isValid;
+    }
+
+    private String hashPassword(String password, String salt) throws Exception {
+        SecretKeyFactory skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA512");
+        PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt.getBytes(), 10000, 256);
+        byte[] hash = skf.generateSecret(spec).getEncoded();
+        return Base64.getEncoder().encodeToString(hash);
+    }
+}
+
+@WebServlet("/transfer")
+public class TransferServlet extends HttpServlet {
+    private static final long serialVersionUID = 1L;
+
+    protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+        HttpSession session = request.getSession(false);
+        if (session == null || session.getAttribute("username") == null) {
+            response.sendRedirect("login.jsp");
+            return;
+        }
+
+        String fromAccount = request.getParameter("fromAccount");
+        String toAccount = request.getParameter("toAccount");
+        double amount = Double.parseDouble(request.getParameter("amount"));
+
+        try {
+            if (transferFunds(fromAccount, toAccount, amount)) {
+                response.getWriter().println("Transfer successful.");
+            } else {
+                response.getWriter().println("Transfer failed.");
+            }
+        } catch (Exception e) {
+            response.getWriter().println("An error occurred during the transfer.");
+        }
+    }
+
+    private boolean transferFunds(String fromAccount, String toAccount, double amount) throws Exception {
+        Connection conn = null;
+        PreparedStatement stmt = null;
+
+        try {
+            conn = DriverManager.getConnection("jdbc:mysql://localhost:3306/bankdb", "root", "password");
+            conn.setAutoCommit(false);
+
+            String withdrawSql = "UPDATE accounts SET balance = balance - ? WHERE account_number = ?";
+            stmt = conn.prepareStatement(withdrawSql);
+            stmt.setDouble(1, amount);
+            stmt.setString(2, fromAccount);
+            int withdrawResult = stmt.executeUpdate();
+
+            String depositSql = "UPDATE accounts SET balance = balance + ? WHERE account_number = ?";
+            stmt = conn.prepareStatement(depositSql);
+            stmt.setDouble(1, amount);
+            stmt.setString(2, toAccount);
+            int depositResult = stmt.executeUpdate();
+
+            if (withdrawResult == 1 && depositResult == 1) {
+                conn.commit();
+                return true;
+            } else {
+                conn.rollback();
+                return false;
+            }
+        } finally {
+            if (stmt != null) stmt.close();
+            if (conn != null) conn.close();
+        }
+    }
+}
+
+
+Security Vulnerabilities and Recommendations:
+1)Hardcoded salt value and inadequate hashing technique are the problems
+Solution: Use a more robust hashing algorithm such as bcrypt, scrypt, or Argon2 with a securely stored and individual salt for every user
+
+2)The use of prepared statements reduces the possibility of SQL injection, Make sure each input has been verified
+Solution: Proceed with utilizing pre-made statements while verifying and cleaning up all user-provided data
+
+3)The code has hardcoded database credentials
+Solution: To safely store database credentials use configuration files or environment variables
+
+4)Securing session management is necessary to stop session hijacking
+Solution: Use secure session management techniques such as session timeouts, CSRF protection, and the use of secure cookies (marked with HttpOnly and Secure flags)
+
+5)If an exception arises, there could be resource leaks.
+Solution: Use try-with-resources to manage resources automatically.
+
+6) Since exceptions are printed directly, confidential information may be revealed.
+Solution: Put in place appropriate logging systems and understandable error messages.
